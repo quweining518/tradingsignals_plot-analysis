@@ -5,29 +5,40 @@ Created on Tue Nov 13 12:33:53 2020
 @author: QU Weining
 """
 output_dir = r'E:\work\trend_system\output\\'
-filename_extension = '1130_timeindex'
+filename_extension = 'trendsystem_1209'
 
 # 1 生成交易统计
 traderecord_time = ucontext.traderecord_time
 traderecord_zs = ucontext.traderecord_zhisun
-traderecord_df = pd.DataFrame(index=list(traderecord_time.keys()),columns=['time','type','openprice','quantity','closeprice','old_sig','sig','position','dailypnl','cumpnl','total_value','code'])
+#traderecord_jc = ucontext.traderecord_jiacang
+traderecord_df = pd.DataFrame(index=list(traderecord_time.keys()),columns=['time','type','openprice','quantity',\
+                                'closeprice','old_sig','sig','position','dailypnl','cumpnl','total_value','code'])
 for date in traderecord_df.index:
     for col in traderecord_df.columns:
         traderecord_df.loc[date,col] = traderecord_time[date][col]
-traderecord_zsdf = pd.DataFrame(index=list(traderecord_zs.keys()),columns=['time','type','openprice','quantity','closeprice','old_sig','sig','position','dailypnl','cumpnl','total_value','code'])
+traderecord_zsdf = pd.DataFrame(index=list(traderecord_zs.keys()),columns=['time','type','openprice','quantity',\
+                                'closeprice','old_sig','sig','position','dailypnl','cumpnl','total_value','code'])
 for datetime in traderecord_zsdf.index:
     for col in traderecord_zsdf.columns:
         traderecord_zsdf.loc[datetime,col] = traderecord_zs[datetime][col]
+#traderecord_jcdf = pd.DataFrame(index=list(traderecord_jc.keys()),columns=['time','type','openprice','quantity',\
+#                                               'closeprice','old_sig','sig','new_position','cumpnl_approx','code'])
+#for datetime in traderecord_jcdf.index:
+#    for col in traderecord_jcdf.columns:
+#        traderecord_jcdf.loc[datetime,col] = traderecord_jc[datetime][col]
 
 traderecord_df.iloc[:,2:-1] = traderecord_df.iloc[:,2:-1].applymap(lambda x: float(x))
 traderecord_zsdf.iloc[:,2:-1] = traderecord_zsdf.iloc[:,2:-1].applymap(lambda x: float(x))
+#traderecord_jcdf.iloc[:,2:-1] = traderecord_jcdf.iloc[:,2:-1].applymap(lambda x: float(x))
 writer = pd.ExcelWriter(output_dir + 'traderecord_{}.xlsx'.format(filename_extension))
 traderecord_df.to_excel(writer, sheet_name='records_day')
 traderecord_zsdf.to_excel(writer, sheet_name='records_zhisun')
+#traderecord_jcdf.to_excel(writer, sheet_name='records_jiacang')
 writer.save()
 
 #2 每日技术指标
-indicators_time= pd.DataFrame(index=list(ucontext.kc_close.keys()), columns = ['kc_upper','kc_middle','kc_lower','typprice','macd','macd_signal','macd_hist','mfi','future','open_lots','atr','adx','+di','-di'])
+indicators_time= pd.DataFrame(index=list(ucontext.kc_close.keys()), columns = ['kc_upper','kc_middle','kc_lower',\
+                    'typprice','macd','macd_signal','macd_hist','mfi','future','open_lots','atr','adx','+di','-di'])
 for date in indicators_time.index:
     indicators_time.loc[date, ['kc_upper','kc_middle','kc_lower','typprice']] = ucontext.kc_close[date]
     indicators_time.loc[date, ['macd','macd_signal','macd_hist','mfi']] = ucontext.macd_mfi[date]
@@ -43,5 +54,7 @@ indicators_time.to_excel(output_dir + 'indicators_{}.xlsx'.format(filename_exten
 #3 每日股价走势图 + 移动平均线类型
 mkt_prices = ucontext.mkt_prices.copy()
 matype_records = pd.DataFrame(ucontext.ma_type_time, index = ['matype']).T
+close_chg = pd.DataFrame(ucontext.close_chg_time, index = ['close_chg']).T
 mkt_prices = pd.merge(mkt_prices, matype_records, left_index = True, right_index = True, how='left')
+mkt_prices = pd.merge(mkt_prices, close_chg, left_index=True, right_index=True, how='left')
 mkt_prices.to_excel(output_dir + 'mkt_prices_{}.xlsx'.format(filename_extension))
