@@ -11,6 +11,7 @@ import matplotlib.pyplot as plt
 import matplotlib.gridspec as gridspec
 import matplotlib.ticker as ticker
 import matplotlib.dates as mdate
+from datetime import datetime
 import warnings
 warnings.filterwarnings("ignore")
 from pandas.plotting import register_matplotlib_converters
@@ -18,37 +19,31 @@ register_matplotlib_converters()
 
 data_dir = r'E:\work\trend_system\output\\'
 output_dir = r'E:\work\trend_system\output\plot_analysis\\'
-filename_extension ='1130_timeindex'
-startdates = ['2018-07-02','2019-07-22', '2020-04-20']
-enddates = ['2019-08-01','2020-04-29','2020-11-19', ]
+filename_extension ='trendsystem_1209'
+years = [2018,2019,2020]
+
+#MA参数
+atr_window = 10
+sma_s1, sma_s2, sma_l1, sma_l2 = 5, 25, 20, 100
+oi_s, oi_l = 5, 25
 
 mkt_prices = pd.read_excel(data_dir + 'mkt_prices_{}.xlsx'.format(filename_extension), parse_dates=True, index_col=0)
 traderecords = pd.read_excel(data_dir + 'traderecord_{}.xlsx'.format(filename_extension), sheet_name= 'records_day', parse_dates=True, index_col=0)
 zs_records = pd.read_excel(data_dir+ 'traderecord_{}.xlsx'.format(filename_extension), sheet_name= 'records_zhisun', parse_dates=True, index_col=0)
 indicators = pd.read_excel(data_dir + 'indicators_{}.xlsx'.format(filename_extension), parse_dates=True, index_col=0)
-traderecords.code = indicators.loc[:,'future']
-trade_mkt = pd.merge(mkt_prices, traderecords, left_index=True, right_index=True, how='left')
-dates = list(trade_mkt.index.astype(str))
-
-sma5 = trade_mkt.close.rolling(window=5).mean()
-sma10 = trade_mkt.close.rolling(window=10).mean()
-sma25 = trade_mkt.close.rolling(window=25).mean()
-sma100 = trade_mkt.close.rolling(window=100).mean()
-
-#zs_records = zs_records.reset_index()
-#zs_records = zs_records.set_index(zs_records['index'].map(lambda x: x.date())).iloc[:,1:]
-
-
 
 #修正index中的交易时间
-tradedate_index = [str(x)[:11] for x in list(traderecords.index)]
-tradetime_index = [str(x) for x in traderecords.time.values]
-trade_index = [pd.to_datetime(x1+x2) for (x1,x2) in zip(tradedate_index, tradetime_index)]
-trade_zs_df = traderecords.copy().reset_index()
-trade_zs_df.loc[:,'index'] = trade_index
-trade_zs_df.set_index('index', inplace=True)
-trade_zs_df = pd.concat([trade_zs_df ,zs_records],axis=0).sort_index(ascending=True)
+tradedate_index = traderecords.index.date.astype(str)#[str(x)[:11] for x in traderecords.index]
+tradetime_index = traderecords.time.values
+traderecords.loc[:,'index'] = [pd.to_datetime(x1+x2, format='%Y-%m-%d%H:%M:%S') for (x1,x2) in zip(tradedate_index, tradetime_index)]
+traderecords.set_index('index', inplace=True)
+trade_zs_df = pd.concat([traderecords ,zs_records],axis=0).sort_index(ascending=True)
 trade_zs_df.loc[zs_records.index, 'zhisun'] = True
+
+#合并全期市场数据与交易数据
+trade_mkt = pd.merge(mkt_prices, trade_zs_df, left_index=True, right_index=True, how='outer')
+trade_mkt.loc[trade_zs_df.index, mkt_prices.columns] = mkt_prices.loc[trade_zs_df.index.date,:].values
+trade_mkt.loc[:,'atr_high'] = trade_mkt.atr.rolling(window=atr_window).max()
 
 #平仓日
 emptylots_date = list(trade_zs_df[trade_zs_df.position == 0].index)
@@ -56,6 +51,7 @@ emptylots_log = trade_zs_df.loc[emptylots_date,:]
 tradedates = list(trade_zs_df.index)
 openlots_date = [0] + [tradedates.index(i)+1 for i in emptylots_date]
 openlots_log = trade_zs_df.iloc[openlots_date,:]
+
 
 print('共{}个开平仓周期 '.format(len(emptylots_date)))
 
@@ -87,16 +83,9 @@ for i in range(len(openlots_log.index)-1):
                                                             add_open,close_l.shape[0]+close_s.shape[0],trade_circle.zhisun.sum(),p_l, winrate))
 print('—————————————————————————————————————————————————————————————————————————————————————')
 
-
-for i in range(len(startdates)):
-    # start = startdates[i]
-    startindex = dates.index(startdates[i])
-    #end = enddates[i]
-    endindex = dates.index(enddates[i])
-    trade_mkt_part = trade_mkt.iloc[startindex:endindex, :]
-    ma_type0 = trade_mkt_part[trade_mkt_part.matype == 0].index
-    ma_type1 = trade_mkt_part[trade_mkt_part.matype == 1].index
-
+#画图
+for year in years:
+    trade_mkt_part = trade_mkt[trade_mkt.index.year==year]
     # 入/出场点
     openpoint_long = trade_mkt_part[trade_mkt_part.type == 'buy_open']
     closepoint_long = trade_mkt_part[trade_mkt_part.type == 'sell_close']
@@ -105,127 +94,139 @@ for i in range(len(startdates)):
 
     #合约展期日标注
     zhanqi_date = list(trade_mkt_part.code.drop_duplicates().dropna().index)
-    if i == 0:
+    if years.index(year) == 0:
         zhanqi_date = zhanqi_date[1:] #首日不算展期日
 
-    #止损点
-    zs_0 = []
-    zs_1 = []
-    for zs in list(zs_records.index):
-        if zs.date() in ma_type0:
-            zs_0.append(zs)
-        elif zs.date() in ma_type1:
-            zs_1.append(zs)
-        else:
-            continue
+    #止损点:追踪
+    trace_zs_0 = trade_mkt_part[(trade_mkt_part.zhisun==True) & (trade_mkt_part.position!=0) & (trade_mkt_part.matype==0)]
+    trace_zs_1 = trade_mkt_part[(trade_mkt_part.zhisun==True) & (trade_mkt_part.position!=0) & (trade_mkt_part.matype==1)]
+    #止损点:绝对
+    abs_zs_0 = trade_mkt_part[(trade_mkt_part.zhisun == True) & (trade_mkt_part.position == 0) & (trade_mkt_part.matype == 0)]
+    abs_zs_1 = trade_mkt_part[(trade_mkt_part.zhisun == True) & (trade_mkt_part.position == 0) & (trade_mkt_part.matype == 1)]
 
+    #ylim
+    ylim_bottom = (trade_mkt_part.close.min()//100 - 1) * 100
+    ylim_top = (trade_mkt_part.close.max()//100 + 1) *100
 
     #画图
     plt.figure(figsize = (20,20))
-    plt.legend()
     gs=gridspec.GridSpec(5,1)
     ax1 = plt.subplot(gs[:2,:])
     ax1.plot(trade_mkt_part.index, trade_mkt_part.close, label='收盘价')
-    try:
-        ax1.scatter(ma_type0, closepoint_long.loc[ma_type0,'closeprice'], marker='*', color='red', label='减/平多头')
-        ax1.scatter(ma_type0, openpoint_long.loc[ma_type0, 'openprice'], marker='^', color='orange', label='多头开仓')
-        ax1.scatter(ma_type0, closepoint_short.loc[ma_type0, 'closeprice'], marker='x', color='c', label='减/平空头')
-        ax1.scatter(ma_type0, openpoint_short.loc[ma_type0, 'openprice'], marker='v', color='m', label='空头开仓')
-        ax1.scatter(zs_0, zs_records.loc[zs_0, 'closeprice'], marker='*', color='black',label='止损点')
-    except KeyError:
-        pass
-    ax1.set_ylim([400,1000])
-    sma5.iloc[startindex:endindex].plot(ax=ax1, alpha=0.4, color = 'r', linestyle='--', label='5日移动平均') #, marker='o')
-    sma25.iloc[startindex:endindex].plot(ax=ax1, alpha=0.4, color = 'c', linestyle='--', label='25日移动平均') #, marker='o')
+    ax1.plot(trade_mkt_part.index, trade_mkt_part.ma_short1, alpha=0.4, color='r', linestyle='--',
+                                                label='{}日移动平均'.format(sma_s1))  # , marker='o')
+    ax1.plot(trade_mkt_part.index, trade_mkt_part.ma_short2, alpha=0.4, color='c', linestyle='--',
+                                               label='{}日移动平均'.format(sma_s2))  # , marker='o')
+    #开平仓
+    scatter_dict = {
+        'closepoint_long':['*','red','多头平仓'],
+        'openpoint_long':['^','orange','多头开仓'],
+        'closepoint_short':['x','c','空头平仓'],
+        'openpoint_short':['v','m','空头开仓']
+    }
+    for pointtype in scatter_dict.keys():
+        scatter_df = eval(pointtype)[eval(pointtype).matype==0]
+        ax1.scatter(scatter_df.index, scatter_df.closeprice, marker=scatter_dict[pointtype][0],\
+                    color=scatter_dict[pointtype][1], label=scatter_dict[pointtype][2])
+    #止损点
+    for zs in trace_zs_0.index:
+        ax1.annotate(s='追踪止损',xy=(zs, trade_mkt_part.loc[zs, 'closeprice']), xytext = (-20,20),\
+                     textcoords='offset points', arrowprops={"arrowstyle":"->"})
+    for zs in abs_zs_0.index:
+        ax1.annotate(s='绝对止损', xy=(zs, trade_mkt_part.loc[zs, 'closeprice']), xytext=(-20, 20),\
+                     textcoords='offset points', arrowprops={"arrowstyle": "->"})
     for zdate in zhanqi_date:
-        ax1.annotate(s='展期日',xy=(zdate, trade_mkt_part.loc[zdate,'close']), xytext=(-20,20), textcoords='offset points', \
-                     arrowprops={"arrowstyle":"->"})
-    for zs in zs_0:
-        ax1.annotate(s='止损减半',xy=(zs, zs_records.loc[zs, 'closeprice']), xytext = (-20,20), textcoords='offset points', \
-                     arrowprops={"arrowstyle":"->"})
+        ax1.annotate(s='展期日',xy=(zdate, trade_mkt_part.loc[zdate,'close']), xytext=(-20,20), \
+                     textcoords='offset points', arrowprops={"arrowstyle":"->"})
+    ax1.fill_between(trade_mkt_part.index, ylim_bottom, ylim_top,
+                     where=trade_mkt_part.oi_s > trade_mkt_part.oi_l, facecolor='orange', alpha=0.2)
+    ax1.set_ylim([ylim_bottom, ylim_top])
     ax1.legend()
     ax1.grid(True)  # 显示网格线
     ax1.grid(linestyle='--', linewidth=1, alpha=0.4)
 
     ax2 = plt.subplot(gs[2:4,:], sharex=ax1)
     ax2.plot(trade_mkt_part.index,trade_mkt_part.close, label='收盘价')
-    try:
-        ax2.scatter(ma_type1, closepoint_long.loc[ma_type1, 'closeprice'], marker='*', color='red', label='减/平多头')
-        ax2.scatter(ma_type1, openpoint_long.loc[ma_type1, 'openprice'], marker='^', color='orange', label='多头开仓')
-        ax2.scatter(ma_type1, closepoint_short.loc[ma_type1, 'closeprice'], marker='x', color='c', label='减/平空头')
-        ax2.scatter(ma_type1, openpoint_short.loc[ma_type1, 'openprice'], marker='v', color='m', label='空头开仓')
-        ax2.scatter(zs_1, zs_records.loc[zs_1, 'closeprice'], marker='*', color='black', label='止损点')
-    except KeyError:
-        pass
-    ax2.set_ylim([400,1000])
-    sma10.iloc[startindex:endindex].plot(ax=ax2, alpha=0.4, color = 'b', linestyle='--', label='10日移动平均') #, marker='o')
-    sma100.iloc[startindex:endindex].plot(ax=ax2, alpha=0.4, color = 'm', linestyle='--', label='100日移动平均') #', marker='o')
-    # ax2.xaxis.set_major_locator(mdate.DateFormatter('%Y-%m'))
+    ax2.plot(trade_mkt_part.index, trade_mkt_part.ma_long1, alpha=0.4, color='b', linestyle='--',
+             label='{}日移动平均'.format(sma_l1))  # , marker='o')
+    ax2.plot(trade_mkt_part.index, trade_mkt_part.ma_long2, alpha=0.4, color='m', linestyle='--',
+             label='{}日移动平均'.format(sma_l2))  # , marker='o')
+
+    for pointtype in scatter_dict.keys():
+        scatter_df = eval(pointtype)[eval(pointtype).matype == 1]
+        ax2.scatter(scatter_df.index, scatter_df.closeprice, marker=scatter_dict[pointtype][0], \
+                    color=scatter_dict[pointtype][1], label=scatter_dict[pointtype][2])
+    for zs in trace_zs_1.index:
+        ax2.annotate(s='追踪止损',xy=(zs, trade_mkt_part.loc[zs, 'closeprice']), xytext = (-20,20), textcoords='offset points', \
+                     arrowprops={"arrowstyle":"->"})
+    for zs in abs_zs_1.index:
+        ax2.annotate(s='绝对止损', xy=(zs, trade_mkt_part.loc[zs, 'closeprice']), xytext=(-20, 20), textcoords='offset points', \
+                     arrowprops={"arrowstyle": "->"})
     for zdate in zhanqi_date:
         ax2.annotate(s='展期日',xy=(zdate, trade_mkt_part.loc[zdate,'close']), xytext=(-20,20), textcoords='offset points', \
                      arrowprops={"arrowstyle":"->"})
-    for zs in zs_1:
-        ax2.annotate(s='止损减半',xy=(zs, zs_records.loc[zs, 'closeprice']), xytext = (-20,20), textcoords='offset points', \
-                     arrowprops={"arrowstyle":"->"})
+    ax2.fill_between(trade_mkt_part.index, ylim_bottom, ylim_top,
+                     where=trade_mkt_part.oi_s > trade_mkt_part.oi_l, facecolor='orange', alpha=0.2)
+    ax2.set_ylim([ylim_bottom, ylim_top])
     ax2.legend()
     ax2.grid(True)  # 显示网格线
     ax2.grid(linestyle='--', linewidth=1, alpha=0.4)
 
     ax3 = plt.subplot(gs[4,:], sharex=ax1)
-    adxindex = list(indicators.columns).index('adx')
-    ax3.plot(indicators.index[startindex:endindex], indicators.iloc[startindex:endindex,adxindex], label='ADX：趋势指标')
-    ax3.set_ylim([0,60])
-    ax3.axhline(35, color='c', lw=1, alpha=0.5, ls='--')
-    ax3.axhline(25, color='r', lw=1, alpha=0.5, ls='--')
-    ax3.axhline(30, color='y', lw=1, alpha=0.5, ls='--')
-    ax3.fill_between(indicators.index[startindex:endindex],0,60, where=indicators.iloc[startindex:endindex,adxindex].values>20, \
-                     facecolor='green', alpha=0.3)
-    # ax3.xaxis.set_major_locator(mdate.DateFormatter('%Y-%m'))
+    tr_1std = trade_mkt_part.tr_mean+trade_mkt_part.tr_std
+    ax3.plot(trade_mkt_part.index, trade_mkt_part.atr_high, label='atr_{}日最大值'.format(atr_window), alpha=0.6)
+    ax3.plot(trade_mkt_part.index, tr_1std, label='250日平均TR+1倍TR标准差',\
+             color='m',linestyle='--',alpha=0.5)
+    ax3.plot(trade_mkt_part.index, trade_mkt_part.close_chg, label='close_chg', alpha=0.6, color='r')
+    ax3.fill_between(trade_mkt_part.index,0,max(trade_mkt_part.atr_high.max(),tr_1std.max(),trade_mkt_part.close_chg.max()),
+                     where = trade_mkt_part.atr_high >tr_1std,facecolor='green',alpha=0.3)
     ax3.grid()
     ax3.grid(linestyle='--', linewidth=1, alpha=0.4)
     ax3.legend()
     plt.gca().xaxis.set_major_formatter(mdate.DateFormatter('%y-%m-%d'))
     plt.gca().xaxis.set_major_locator(ticker.MultipleLocator(20))
-    plt.savefig(output_dir + 'plot_{}-{}.png'.format(startdates[i],enddates[i]))
+    plt.savefig(output_dir + 'plot_{}.png'.format(year))
     plt.show()
 
+    #盈亏统计
     win_long_part = closepoint_long[closepoint_long.closeprice >= closepoint_long.openprice]
     lose_long_part = closepoint_long[closepoint_long.closeprice < closepoint_long.openprice]
     win_short_part = closepoint_short[closepoint_short.closeprice <= closepoint_short.openprice]
     lose_short_part = closepoint_short[closepoint_short.closeprice > closepoint_short.openprice]
-    win_count_part = win_long_part.shape[0] + win_short_part.shape[0]
-    lose_count_part = lose_long_part.shape[0] + lose_short_part.shape[0]
+    win_count = win_long_part.shape[0] + win_short_part.shape[0]
+    lose_count = lose_long_part.shape[0] + lose_short_part.shape[0]
 
-    win_long_part.loc[:,'nominal_pnl'] = (win_long_part.closeprice - win_long_part.openprice) * abs(win_long_part.quantity)
-    win_short_part.loc[:,'nominal_pnl'] = abs(win_short_part.closeprice - win_short_part.openprice) * abs(win_short_part.quantity)
-    lose_long_part.loc[:,'nominal_pnl'] = abs(lose_long_part.closeprice - lose_long_part.openprice) * abs(lose_long_part.quantity)
-    lose_short_part.loc[:,'nominal_pnl'] = (lose_short_part.closeprice - lose_short_part.openprice) * abs(lose_short_part.quantity)
-    win_lose_ratio_part = ((win_long_part.nominal_pnl.sum() + win_short_part.nominal_pnl.sum()) / win_count_part) / \
+    win_long_part.loc[:,'nominal_pnl'] = (win_long_part.closeprice - win_long_part.openprice) * abs(win_long_part.quantity) *100
+    win_short_part.loc[:,'nominal_pnl'] = abs(win_short_part.closeprice - win_short_part.openprice) * abs(win_short_part.quantity) *100
+    lose_long_part.loc[:,'nominal_pnl'] = abs(lose_long_part.closeprice - lose_long_part.openprice) * abs(lose_long_part.quantity) *100
+    lose_short_part.loc[:,'nominal_pnl'] = (lose_short_part.closeprice - lose_short_part.openprice) * abs(lose_short_part.quantity) *100
+    win_lose_ratio = ((win_long_part.nominal_pnl.sum() + win_short_part.nominal_pnl.sum()) / win_count_part) / \
                      ((lose_long_part.nominal_pnl.sum() + lose_short_part.nominal_pnl.sum()) / lose_count_part)
-    print('时间段 {} - {}'.format(startdates[i], enddates[i]))
-    print('总交易次数：{} | 平/减仓次数：{} | 胜：{} | 负：{} | 胜率：{}'.format(trade_mkt_part.dropna().shape[0], win_count_part + lose_count_part, win_count_part, lose_count_part,
-                                                 win_count_part / (win_count_part + lose_count_part)))
-    print('盈亏比：{}'.format(win_lose_ratio_part))
+    print('时间段 {}'.format(year))
+    print('总交易次数：{} | 平/减仓次数：{} | 胜：{} | 负：{} | 胜率：{}'.format(trade_mkt_part.type.dropna().shape[0], win_count+lose_count,\
+                                                              win_count, lose_count, win_count / (win_count + lose_count)))
+    print('盈亏比：{}'.format(win_lose_ratio))
     print('—————————————————————————————————————————————————————————————————————————————————————')
 
-closepoints_l = traderecords[traderecords.type == 'sell_close']
+#总盈亏统计
+closepoints_l = trade_zs_df[trade_zs_df.type == 'sell_close']
 win_long = closepoints_l[closepoints_l.closeprice >= closepoints_l.openprice]
 lose_long = closepoints_l[closepoints_l.closeprice < closepoints_l.openprice]
-closepoints_s = traderecords[traderecords.type == 'buy_close']
+closepoints_s = trade_zs_df[trade_zs_df.type == 'buy_close']
 win_short = closepoints_s[closepoints_s.closeprice <= closepoints_s.openprice]
 lose_short = closepoints_s[closepoints_s.closeprice > closepoints_s.openprice]
 #胜率
 win_count = win_long.shape[0] + win_short.shape[0]
 lose_count = lose_long.shape[0] + lose_short.shape[0]
-
 #盈亏比
-win_long.loc[:,'nominal_pnl'] = (win_long.closeprice - win_long.openprice) * abs(win_long.quantity)
-win_short.loc[:,'nominal_pnl'] = abs(win_short.closeprice - win_short.openprice) * abs(win_short.quantity)
-lose_long.loc[:,'nominal_pnl'] = abs(lose_long.closeprice - lose_long.openprice) * abs(lose_long.quantity)
-lose_short.loc[:,'nominal_pnl'] = (lose_short.closeprice - lose_short.openprice) * abs(lose_short.quantity)
+win_long.loc[:,'nominal_pnl'] = (win_long.closeprice - win_long.openprice) * abs(win_long.quantity) * 100
+win_short.loc[:,'nominal_pnl'] = abs(win_short.closeprice - win_short.openprice) * abs(win_short.quantity) * 100
+lose_long.loc[:,'nominal_pnl'] = abs(lose_long.closeprice - lose_long.openprice) * abs(lose_long.quantity) * 100
+lose_short.loc[:,'nominal_pnl'] = (lose_short.closeprice - lose_short.openprice) * abs(lose_short.quantity) * 100
 win_lose_ratio = ((win_long.nominal_pnl.sum()+win_short.nominal_pnl.sum()) / win_count) /\
                 ((lose_long.nominal_pnl.sum()+lose_short.nominal_pnl.sum()) / lose_count)
 print('时间段 {} - {}'.format(startdates[0],enddates[-1]))
-print('总交易次数：{} | 平/减仓次数：{} | 胜：{} | 负：{} | 胜率：{}'.format(traderecords.shape[0], win_count+lose_count, win_count, lose_count, win_count/(win_count+lose_count)))
+print('总交易次数：{} | 平/减仓次数：{} | 胜：{} | 负：{} | 胜率：{}'.format(trade_zs_df.shape[0], win_count+lose_count, \
+                                                          win_count, lose_count, win_count/(win_count+lose_count)))
 print('盈亏比：{}'.format(win_lose_ratio))
 print('—————————————————————————————————————————————————————————————————————————————————————')
